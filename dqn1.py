@@ -10,7 +10,10 @@ import torch.nn.functional as F
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
 
 GAMMA = 0.99 # 時間割引率
-NUM_EPISODES = 500 # 最大試行回数
+NUM_EPISODES = 1000 # 最大試行回数
+BATCH_SIZE = 32
+CAPACITY = 10000 # メモリの容量
+
 
 class ReplayMerory:
     '''経験を保存するメモリクラスの定義'''
@@ -34,9 +37,6 @@ class ReplayMerory:
         return random.sample(self.memory, batch_size)
 
 
-BATCH_SIZE = 32
-CAPACITY = 10000
-
 class Net(nn.Module):
 
     def __init__(self, n_in, n_mid, n_out):
@@ -59,7 +59,7 @@ class Brain:
         self.memory = ReplayMemory(CAPACITY)
 
         # NNを構築
-        n_in, n_mid, n_out = num_states, 32, num_actions
+        n_in, n_mid, n_out = num_states, 128, num_actions
         self.main_q_network = Net(n_in, n_mid, n_out)
         self.target_q_network = net(n_in, n_mid, n_out)
 
@@ -147,9 +147,9 @@ class Brain:
         # 3.4 教師となるQ(s_t, a_t)値を、Q学習の式から求める
 
         # ここで、現在の状態と次の状態の手番が同じか異なるかで場合分けが生じる
-        index_diff_value = np.where(self.state_batch[non_final_mask][:,0] != torch.cat(self.batch.next_state)[non_final_mask][:,0])
+        index_diff_value, = np.where(self.state_batch[non_final_mask,0] != torch.cat(self.batch.next_state)[non_final_mask,0])
         divided_frag = torch.ones(BATCH_SIZE)
-        divided_frag[index_diff_value] = divided_frag[index_diff_value] * -1 
+        divided_frag[index_diff_value] = -1 * divided_frag[index_diff_value]
 
         expected_state_action_values = (self.reward_batch + GAMMA * next_state_values) * divided_frag
         
@@ -199,14 +199,19 @@ class Agent:
 class Environment:
 
     def __init__(self):
-        num_states = self.env.num_states ####
-        num_actions = self.env.num_actions
+        num_states = 65
+        num_actions = 64
         self.agent = Agent(num_states, num_actions)
 
     def run(self):
 
         for episode in range(NUM_EPISODES):
             state, player = self.env.reset() # 環境の初期化
+
+            state = np.array(state)
+            player = np.array([player])
+            state = np.append(player, state)
+
             step_frag = True
 
             state = torch.from_numpy(state).type(torch.FloatTensor) # numpy　→ torch.FloatTensor
@@ -217,19 +222,24 @@ class Environment:
                 action = self.agent.get_action(state, episode) # 行動を求める
 
                 # 行動a_tの実行により、s_{t+1}とdoneフラグを求める
-                state_next, playter, win_los_frag = self.env.step(state.item(), action.item(), player)
+                state_raw = list(np.array(state[0][1:]))
+                state_next, player, win_los_frag = self.env.step(state_raw, action.item(), player)
+                
+                state_next = np.array(state_next)
+                player = np.array([player])
+                state_next = np.append(player, state_next)
 
                 # 終了したとき（勝ち負けが決まったか、反則を犯したとき）
                 if win_los_frag == 1:
-                    reward = torch.FloatTensor([1.0])
+                    reward = torch.FloatTensor([1.0]) # 勝ったとき
                     step_frag = False
 
                 elif win_los_frag == -1:
-                    reward = torch.FloatTensor([-1.0])
+                    reward = torch.FloatTensor([-1.0]) # 負けたとき
                     step_frag = False
                 
                 elif win_los_frag == 2:
-                    reward = torch.FloatTensor([0.0])
+                    reward = torch.FloatTensor([0.0]) # 引き分けのとき
                     step_frag = False
 
                 else:
@@ -247,4 +257,4 @@ class Environment:
                 state = state_next
 
         # 終了時モデル保存
-        torch.save(self.agent.brain.state_dict(), 'reversiWebAPP/reversiApp/models/model1.pt')
+        torch.save(self.agent.brain.main_q_network.state_dict(), 'reversiWebAPP/reversiApp/models/model1.pt')

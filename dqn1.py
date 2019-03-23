@@ -212,12 +212,10 @@ class Environment:
             player = np.array([player])
             state = np.append(player, state)
 
-            step_frag = True
-
             state = torch.from_numpy(state).type(torch.FloatTensor) # numpy　→ torch.FloatTensor
             state = torch.unsqueeze(state, 0) # size65 → size 1x65
 
-            while step_frag:
+            while(1):
 
                 action = self.agent.get_action(state, episode) # 行動を求める
 
@@ -232,15 +230,12 @@ class Environment:
                 # 終了したとき（勝ち負けが決まったか、反則を犯したとき）
                 if win_los_frag == 1:
                     reward = torch.FloatTensor([1.0]) # 勝ったとき
-                    step_frag = False
 
                 elif win_los_frag == -1:
                     reward = torch.FloatTensor([-1.0]) # 負けたとき
-                    step_frag = False
                 
                 elif win_los_frag == 2:
                     reward = torch.FloatTensor([0.0]) # 引き分けのとき
-                    step_frag = False
 
                 else:
                     reward = torch.FloatTensor([0.0]) # 普段は報酬0
@@ -255,6 +250,12 @@ class Environment:
 
                 # 観測の更新
                 state = state_next
+
+                # 終了時の処理
+                if win_los_frag != 0:
+                    if (episode % 2 == 0):
+                        self.agent.update_target_q_function()
+                    break
 
         # 終了時モデル保存
         torch.save(self.agent.brain.main_q_network.state_dict(), 'reversiWebAPP/reversiApp/models/model1.pt')
